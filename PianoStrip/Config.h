@@ -30,7 +30,7 @@ static const int kLedBaseMidi = 36;
 static const unsigned long kLcdRefreshMs = 200;
 
 // FFT sampling
-static const uint16_t kFftSamples = 128;
+static const uint16_t kFftSamples = 256;
 static const float kFftSampleRate = 8000.0f;
 
 // Song playback default (override per song)

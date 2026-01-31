@@ -1,5 +1,4 @@
 #include <arduinoFFT.h>
-#include <avr/pgmspace.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,39 +17,10 @@ static const char* kNoteNames[12] = {
   "F#", "G", "G#", "A", "A#", "B"
 };
 
-static float gChroma[12];
-static float gChromaSmooth[12];
-static int8_t gBinToPc[kFftSamples / 2];
-static float gBinOctaveWeight[kFftSamples / 2];
-
-static const float kChromaAlpha = 0.30f;
-static const float kChromaThreshold = 4.0f;
-
 void setupMatrix() {
   gMatrix.shutdown(0, false);
   gMatrix.setIntensity(0, 8);
   gMatrix.clearDisplay(0);
-}
-
-void setupBinToPc() {
-  for (int k = 0; k < (int)(kFftSamples / 2); k++) {
-    float f = (float)k * kFftSampleRate / (float)kFftSamples;
-    if (f < 60.0f || f > 2500.0f) {
-      gBinToPc[k] = -1;
-      gBinOctaveWeight[k] = 0.0f;
-      continue;
-    }
-    int midi = (int)lroundf(69.0f + 12.0f * log(f / 440.0f) / log(2.0f));
-    int pc = (midi % 12 + 12) % 12;
-    int octave = midi / 12;
-    gBinToPc[k] = (int8_t)pc;
-    gBinOctaveWeight[k] = 1.0f / (1.0f + 0.15f * octave);
-  }
-}
-
-void setupMic() {
-  setupMatrix();
-  setupBinToPc();
 }
 
 void drawChar(char c) {
@@ -58,8 +28,7 @@ void drawChar(char c) {
     return;
   }
   for (int i = 0; i < 8; i++) {
-    uint8_t col = pgm_read_byte(&font8x8_basic[(int)c][i]);
-    gMatrix.setColumn(0, i, col);
+    gMatrix.setColumn(0, i, font8x8_basic[(int)c][i]);
   }
 }
 
@@ -81,66 +50,34 @@ void sampleFftBlock() {
   }
 }
 
-void computeChroma() {
-  for (int i = 0; i < 12; i++) {
-    gChroma[i] = 0.0f;
+int freqToMidi(float freq) {
+  if (freq <= 0) {
+    return -1;
   }
-
-  const float kFmin = 100.0f;
-  const float kFmax = 2500.0f;
-
-  int kMin = (int)ceilf(kFmin * (float)kFftSamples / kFftSampleRate);
-  int kMax = (int)floorf(kFmax * (float)kFftSamples / kFftSampleRate);
-  if (kMin < 2) kMin = 2;
-  int kNy = (kFftSamples / 2) - 2;
-  if (kMax > kNy) kMax = kNy;
-
-  for (int k = kMin; k <= kMax; k++) {
-    float mag = gVReal[k];
-    if (mag <= 0.0f) {
-      continue;
-    }
-    int pc = gBinToPc[k];
-    if (pc < 0) {
-      continue;
-    }
-    float f = (float)k * kFftSampleRate / (float)kFftSamples;
-    float w = 1.0f / (1.0f + 0.001f * f);
-    float contrib = mag * w * gBinOctaveWeight[k];
-    if (contrib > gChroma[pc]) {
-      gChroma[pc] = contrib;
-    }
-  }
-
-  for (int i = 0; i < 12; i++) {
-    gChromaSmooth[i] =
-      (1.0f - kChromaAlpha) * gChromaSmooth[i] +
-      kChromaAlpha * gChroma[i];
-  }
+  return (int)lroundf(69.0f + 12.0f * log(freq / 440.0f) / log(2.0f));
 }
 
-void topPitchClasses(int outPc[4]) {
-  bool used[12] = {false};
-  for (int n = 0; n < 4; n++) {
-    float best = -1.0f;
-    int bestPc = -1;
-    for (int pc = 0; pc < 12; pc++) {
-      if (!used[pc] && gChromaSmooth[pc] > best) {
-        best = gChromaSmooth[pc];
-        bestPc = pc;
+void findTopBins(int* bins, int binCount) {
+  for (int i = 0; i < binCount; i++) {
+    bins[i] = -1;
+  }
+  for (int i = 2; i < (int)(kFftSamples / 2); i++) {
+    float mag = gVReal[i];
+    int insertAt = -1;
+    for (int j = 0; j < binCount; j++) {
+      if (bins[j] < 0 || mag > gVReal[bins[j]]) {
+        insertAt = j;
+        break;
       }
     }
-    if (best > kChromaThreshold) {
-      outPc[n] = bestPc;
-      used[bestPc] = true;
-    } else {
-      outPc[n] = -1;
+    if (insertAt < 0) {
+      continue;
     }
+    for (int j = binCount - 1; j > insertAt; j--) {
+      bins[j] = bins[j - 1];
+    }
+    bins[insertAt] = i;
   }
-}
-
-int midiFromPitchClass(int pc) {
-  return kLedBaseMidi + pc;
 }
 
 void updateMicDemo(char* detailLine, size_t detailSize) {
@@ -149,58 +86,56 @@ void updateMicDemo(char* detailLine, size_t detailSize) {
   gFft.compute(FFT_FORWARD);
   gFft.complexToMagnitude();
 
-  computeChroma();
-
-  int pcs[4];
-  topPitchClasses(pcs);
+  int topBins[4];
+  findTopBins(topBins, 4);
 
   clearStrip();
-  int mainPc = -1;
-  char notesLine[32] = "";
-  size_t notesLen = 0;
+  int mainMidi = -1;
+  char notesLine[32] = "Mic: ";
+  size_t notesLen = strlen(notesLine);
 
   for (int i = 0; i < 4; i++) {
-    int pc = pcs[i];
-    if (pc < 0) {
+    int bin = topBins[i];
+    if (bin < 0) {
       continue;
     }
-    if (mainPc < 0) {
-      mainPc = pc;
+    float freq = (float)bin * kFftSampleRate / (float)kFftSamples;
+    int midi = freqToMidi(freq);
+    if (midi < 0) {
+      continue;
     }
-    int midi = midiFromPitchClass(pc);
+    if (mainMidi < 0) {
+      mainMidi = midi;
+    }
+    int pc = midi % 12;
+    if (pc < 0) {
+      pc += 12;
+    }
     lightMidiNote(midi);
+    const char* name = kNoteNames[pc];
+    size_t nameLen = strlen(name);
+    if (notesLen + nameLen + 2 < sizeof(notesLine)) {
+      memcpy(notesLine + notesLen, name, nameLen);
+      notesLen += nameLen;
+      notesLine[notesLen++] = ' ';
+      notesLine[notesLen] = '\0';
+    }
   }
 
   showStrip();
 
-  for (int i = 0; i < 4; i++) {
-    int pc = pcs[i];
-    if (pc >= 0) {
-      const char* name = kNoteNames[pc];
-      size_t nameLen = strlen(name);
-      if (notesLen + nameLen + 2 < sizeof(notesLine)) {
-        memcpy(notesLine + notesLen, name, nameLen);
-        notesLen += nameLen;
-        notesLine[notesLen++] = ' ';
-        notesLine[notesLen] = '\0';
-      }
-    } else {
-      if (notesLen + 3 < sizeof(notesLine)) {
-        memcpy(notesLine + notesLen, "-- ", 3);
-        notesLen += 3;
-        notesLine[notesLen] = '\0';
-      }
+  if (mainMidi >= 0) {
+    int mainPc = mainMidi % 12;
+    if (mainPc < 0) {
+      mainPc += 12;
     }
-  }
-
-  if (mainPc >= 0) {
     drawChar(kNoteNames[mainPc][0]);
   } else {
     drawChar(' ');
   }
 
-  if (notesLen == 0) {
-    snprintf(detailLine, detailSize, "-- -- -- --");
+  if (notesLen == strlen("Mic: ")) {
+    snprintf(detailLine, detailSize, "Mic: --");
   } else {
     snprintf(detailLine, detailSize, "%s", notesLine);
   }
