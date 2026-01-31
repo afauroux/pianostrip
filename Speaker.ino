@@ -145,12 +145,14 @@ int noteDurations[] = {
 #include <LiquidCrystal.h>
 #include <arduinoFFT.h>
 #include "LedControl.h"
+#include <avr/pgmspace.h>
 #include "font8x8_basic.h"
 
 // ---- FONTS ----
 void drawChar(char c) {
   for (int i = 0; i < 8; i++) {
-    lc.setColumn(0, i, font8x8_basic[c][i]);
+    uint8_t col = pgm_read_byte(&font8x8_basic[(int)c][i]);
+    lc.setColumn(0, i, col);
   }
 }
 
