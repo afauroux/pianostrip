@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import os
+import re
 from typing import List, Dict, Tuple, Set
 
 import pretty_midi
@@ -138,9 +140,65 @@ def midi_to_symbol_array(
     return symbols, step_s
 
 
+def sanitize_name(name: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_]+", "_", name.strip())
+    cleaned = cleaned.strip("_")
+    return cleaned or "Song"
+
+
+def emit_header(songs: List[Tuple[str, List[str], float]], header_path: str) -> None:
+    lines: List[str] = []
+    lines.append("#pragma once")
+    lines.append("")
+    lines.append("#include <avr/pgmspace.h>")
+    lines.append("")
+    lines.append("struct Song {")
+    lines.append("  const char* name;")
+    lines.append("  const char* const* steps;")
+    lines.append("  size_t stepCount;")
+    lines.append("  float stepSeconds;")
+    lines.append("};")
+    lines.append("")
+
+    for song_name, symbols, step_s in songs:
+        array_name = f"kSong_{sanitize_name(song_name)}"
+        for idx, symbol in enumerate(symbols):
+            token = symbol.replace("\"", "\\\"")
+            lines.append(f"static const char {array_name}_{idx}[] PROGMEM = \"{token}\";")
+        lines.append("")
+        lines.append(f"static const char* const {array_name}[] PROGMEM = {{")
+        for idx, _symbol in enumerate(symbols):
+            lines.append(f"  {array_name}_{idx},")
+        lines.append("};")
+        lines.append("")
+
+    for song_name, _symbols, _step_s in songs:
+        name_id = f"kSongName_{sanitize_name(song_name)}"
+        lines.append(f"static const char {name_id}[] PROGMEM = \"{song_name}\";")
+    lines.append("")
+
+    lines.append("static const Song kSongs[] = {")
+    for song_name, symbols, step_s in songs:
+        array_name = f"kSong_{sanitize_name(song_name)}"
+        name_id = f"kSongName_{sanitize_name(song_name)}"
+        lines.append("  {")
+        lines.append(f"    {name_id},")
+        lines.append(f"    {array_name},")
+        lines.append(f"    sizeof({array_name}) / sizeof({array_name}[0]),")
+        lines.append(f"    {step_s:.6f}f")
+        lines.append("  },")
+    lines.append("};")
+    lines.append("")
+    lines.append("static const size_t kSongCount = sizeof(kSongs) / sizeof(kSongs[0]);")
+    lines.append("")
+
+    with open(header_path, \"w\", encoding=\"utf-8\") as f:
+        f.write(\"\\n\".join(lines))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("midi", help="Path to .mid/.midi file")
+    ap.add_argument("midi", nargs="+", help="Path(s) to .mid/.midi file(s)")
     ap.add_argument(
         "--steps-per-beat", type=int, default=4, help="4=16th notes, 2=8th, 1=quarter"
     )
@@ -159,35 +217,68 @@ def main() -> None:
     ap.add_argument(
         "--out", default=None, help="Optional output .txt file (one symbol per step)"
     )
+    ap.add_argument(
+        "--out-header",
+        default=None,
+        help="Optional output .h file with arrays and a kSongs meta array",
+    )
+    ap.add_argument(
+        "--song-name",
+        action="append",
+        default=None,
+        help="Override song name (repeatable, matches order of MIDI inputs)",
+    )
     args = ap.parse_args()
 
-    symbols, step_s = midi_to_symbol_array(
-        args.midi,
-        steps_per_beat=args.steps_per_beat,
-        instrument_index=args.instrument_index,
-        mode=args.mode,
-        symbol_silence=args.silence,
-        chord_join=args.join,
-    )
+    songs: List[Tuple[str, List[str], float]] = []
 
-    header = f"# steps={len(symbols)} step_s={step_s:.6f} mode={args.mode} steps_per_beat={args.steps_per_beat}"
-    if args.do_print:
-        print(header)
-        print(symbols)
+    for index, midi_path in enumerate(args.midi):
+        symbols, step_s = midi_to_symbol_array(
+            midi_path,
+            steps_per_beat=args.steps_per_beat,
+            instrument_index=args.instrument_index,
+            mode=args.mode,
+            symbol_silence=args.silence,
+            chord_join=args.join,
+        )
+        if args.song_name and index < len(args.song_name):
+            song_name = args.song_name[index]
+        else:
+            song_name = os.path.splitext(os.path.basename(midi_path))[0]
+        songs.append((song_name, symbols, step_s))
 
-    i=0
-    j=0;
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as f:
-            f.write(header + "\n")
-            w = 20
-            while w*j+i<len(symbols):
-                i=0
-                for i in range(w): 
-                    f.write(symbols[j*w+i] + ",")
-                j+=1
+        header = (
+            f"# steps={len(symbols)} step_s={step_s:.6f} mode={args.mode} "
+            f"steps_per_beat={args.steps_per_beat}"
+        )
+        if args.do_print:
+            print(header)
+            print(symbols)
+
+        if args.out:
+            base = os.path.splitext(os.path.basename(midi_path))[0]
+            txt_path = args.out
+            if len(args.midi) > 1:
+                root, ext = os.path.splitext(args.out)
+                txt_path = f\"{root}_{sanitize_name(base)}{ext or '.txt'}\"
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(header + "\n")
+                w = 20
+                i = 0
+                j = 0
+                while w * j + i < len(symbols):
+                    i = 0
+                    for i in range(w):
+                        idx = j * w + i
+                        if idx >= len(symbols):
+                            break
+                        f.write(symbols[idx] + ",")
+                    j += 1
+                    f.write("\n")
                 f.write("\n")
-            f.write("\n")
+
+    if args.out_header:
+        emit_header(songs, args.out_header)
 
 
 if __name__ == "__main__":
