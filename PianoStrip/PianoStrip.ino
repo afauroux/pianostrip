@@ -5,7 +5,7 @@
 void setupLedStrip();
 void setupLcd();
 void setupEncoder();
-void setupMic();
+void setupMatrix();
 int readEncoderDelta();
 void updateLcdMenu(const char* modeLabel, const char* detailLine);
 void updateRainbowDemo(char* detailLine, size_t detailSize);
@@ -32,7 +32,7 @@ void setup() {
   setupLedStrip();
   setupLcd();
   setupEncoder();
-  setupMic();
+  setupMatrix();
 }
 
 void updateMode(int delta) {
