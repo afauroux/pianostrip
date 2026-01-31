@@ -5,20 +5,24 @@
 void setupLedStrip();
 void setupLcd();
 void setupEncoder();
+void setupMatrix();
 int readEncoderDelta();
 void updateLcdMenu(const char* modeLabel, const char* detailLine);
 void updateRainbowDemo(char* detailLine, size_t detailSize);
+void updateMicDemo(char* detailLine, size_t detailSize);
 void updateSongDemo(char* detailLine, size_t detailSize);
 void resetSongDemo();
 
 enum DemoMode {
   kModeRainbow = 0,
-  kModeSong = 1,
+  kModeMic = 1,
+  kModeSong = 2,
   kModeCount
 };
 
 static const char* kModeLabels[] = {
   "Rainbow",
+  "Mic",
   "Song"
 };
 
@@ -28,6 +32,7 @@ void setup() {
   setupLedStrip();
   setupLcd();
   setupEncoder();
+  setupMatrix();
 }
 
 void updateMode(int delta) {
@@ -55,6 +60,9 @@ void loop() {
   switch (gMode) {
     case kModeRainbow:
       updateRainbowDemo(detailLine, sizeof(detailLine));
+      break;
+    case kModeMic:
+      updateMicDemo(detailLine, sizeof(detailLine));
       break;
     case kModeSong:
       updateSongDemo(detailLine, sizeof(detailLine));
