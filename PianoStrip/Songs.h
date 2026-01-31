@@ -11,19 +11,13 @@ struct Song {
   float stepSeconds;
 };
 
-#include <avr/pgmspace.h>
-
-static const char kSong_Empty_0[] PROGMEM = "";
-
-static const char* const kSong_Empty[] PROGMEM = {
-  kSong_Empty_0
+static const char* const kSong_Empty[] = {
+  ""
 };
 
-static const char kSongName_Empty[] PROGMEM = "Empty";
-
-static const Song kSongs[] PROGMEM = {
+static const Song kSongs[] = {
   {
-    kSongName_Empty,
+    "Empty",
     kSong_Empty,
     sizeof(kSong_Empty) / sizeof(kSong_Empty[0]),
     0.12f

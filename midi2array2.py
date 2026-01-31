@@ -150,8 +150,6 @@ def emit_header(songs: List[Tuple[str, List[str], float]], header_path: str) -> 
     lines: List[str] = []
     lines.append("#pragma once")
     lines.append("")
-    lines.append("#include <avr/pgmspace.h>")
-    lines.append("")
     lines.append("struct Song {")
     lines.append("  const char* name;")
     lines.append("  const char* const* steps;")
@@ -162,27 +160,18 @@ def emit_header(songs: List[Tuple[str, List[str], float]], header_path: str) -> 
 
     for song_name, symbols, step_s in songs:
         array_name = f"kSong_{sanitize_name(song_name)}"
-        for idx, symbol in enumerate(symbols):
+        lines.append(f"static const char* const {array_name}[] = {{")
+        for symbol in symbols:
             token = symbol.replace("\"", "\\\"")
-            lines.append(f"static const char {array_name}_{idx}[] PROGMEM = \"{token}\";")
-        lines.append("")
-        lines.append(f"static const char* const {array_name}[] PROGMEM = {{")
-        for idx, _symbol in enumerate(symbols):
-            lines.append(f"  {array_name}_{idx},")
+            lines.append(f"  \"{token}\",")
         lines.append("};")
         lines.append("")
-
-    for song_name, _symbols, _step_s in songs:
-        name_id = f"kSongName_{sanitize_name(song_name)}"
-        lines.append(f"static const char {name_id}[] PROGMEM = \"{song_name}\";")
-    lines.append("")
 
     lines.append("static const Song kSongs[] = {")
     for song_name, symbols, step_s in songs:
         array_name = f"kSong_{sanitize_name(song_name)}"
-        name_id = f"kSongName_{sanitize_name(song_name)}"
         lines.append("  {")
-        lines.append(f"    {name_id},")
+        lines.append(f"    \"{song_name}\",")
         lines.append(f"    {array_name},")
         lines.append(f"    sizeof({array_name}) / sizeof({array_name}[0]),")
         lines.append(f"    {step_s:.6f}f")

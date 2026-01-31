@@ -1,7 +1,6 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <avr/pgmspace.h>
 #include "Config.h"
 #include "Songs.h"
 
@@ -9,19 +8,6 @@ static size_t gSongIndex = 0;
 static size_t gSongStep = 0;
 static unsigned long gLastStepMs = 0;
 static unsigned long gToneStopMs = 0;
-static char gStepBuffer[64];
-
-const char* readStepFromProgmem(size_t songIndex, size_t stepIndex) {
-  PGM_P stepsPtr = (PGM_P)pgm_read_ptr(&kSongs[songIndex].steps);
-  PGM_P stepPtr = (PGM_P)pgm_read_ptr(&stepsPtr[stepIndex]);
-  if (!stepPtr) {
-    gStepBuffer[0] = '\0';
-    return gStepBuffer;
-  }
-  strncpy_P(gStepBuffer, stepPtr, sizeof(gStepBuffer) - 1);
-  gStepBuffer[sizeof(gStepBuffer) - 1] = '\0';
-  return gStepBuffer;
-}
 
 int noteLetterToSemitone(char letter) {
   switch (letter) {
@@ -105,9 +91,8 @@ void playChordStep(const char* step) {
 
 void advanceSongStep() {
   const Song& song = kSongs[gSongIndex];
-  const char* step = readStepFromProgmem(gSongIndex, gSongStep);
-  playChordStep(step);
-  int midi = parseFirstMidi(step);
+  playChordStep(song.steps[gSongStep]);
+  int midi = parseFirstMidi(song.steps[gSongStep]);
   if (midi >= 0) {
     float freq = midiToFrequency(midi);
     if (freq > 0.0f) {
@@ -133,10 +118,7 @@ void updateSongDemo(char* detailLine, size_t detailSize) {
     gToneStopMs = 0;
   }
 
-  char nameBuffer[24];
-  strncpy_P(nameBuffer, (PGM_P)song.name, sizeof(nameBuffer) - 1);
-  nameBuffer[sizeof(nameBuffer) - 1] = '\0';
-  snprintf(detailLine, detailSize, "Song: %s", nameBuffer);
+  snprintf(detailLine, detailSize, "Song: %s", song.name);
 }
 
 void resetSongDemo() {
